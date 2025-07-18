@@ -1,16 +1,14 @@
 require('dotenv').config();
 const express = require('express');
-const ytdl = require('ytdl-core');
+const { exec } = require('yt-dlp-exec'); // Replaces ytdl-core
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
-const axios = require('axios');
-const FormData = require('form-data');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(express.json());
 
-// Initialize Supabase client
+// Initialize Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
@@ -21,7 +19,8 @@ app.get('/', (req, res) => res.send('Audio Processor Running'));
 app.post('/process', async (req, res) => {
   const { url } = req.body;
   
-  if (!ytdl.validateURL(url)) {
+  // Basic URL validation
+  if (!url.includes('youtube.com/watch')) {
     return res.status(400).json({ error: 'Invalid YouTube URL' });
   }
 
@@ -30,17 +29,12 @@ app.post('/process', async (req, res) => {
   const storagePath = `audios/${fileName}`;
 
   try {
-    // Step 1: Download and convert audio
-    await new Promise((resolve, reject) => {
-      ytdl(url, { quality: 'highestaudio' })
-        .pipe(fs.createWriteStream(tempFile))
-        .on('finish', resolve)
-        .on('error', reject);
-    });
+    // Step 1: Download audio using yt-dlp (more reliable)
+    await exec(`yt-dlp -x -f bestaudio --audio-format mp3 -o ${tempFile} ${url}`);
 
     // Step 2: Upload to Supabase Storage
     const fileContent = fs.readFileSync(tempFile);
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from('audios')
       .upload(storagePath, fileContent, {
         contentType: 'audio/mpeg',
@@ -54,19 +48,17 @@ app.post('/process', async (req, res) => {
       .from('audios')
       .getPublicUrl(storagePath);
 
-    // Step 4: Insert record into audio_files table
+    // Step 4: Insert record
     const { data: dbData, error: dbError } = await supabase
       .from('audio_files')
-      .insert([
-        {
-          audio_url: urlData.publicUrl,
-          source_url: url,
-          file_name: fileName,
-          file_path: storagePath,
-          created_at: new Date().toISOString(),
-          status: 'processed'
-        }
-      ])
+      .insert([{
+        audio_url: urlData.publicUrl,
+        source_url: url,
+        file_name: fileName,
+        file_path: storagePath,
+        created_at: new Date().toISOString(),
+        status: 'processed'
+      }])
       .select();
 
     if (dbError) throw dbError;
@@ -74,16 +66,14 @@ app.post('/process', async (req, res) => {
     // Cleanup
     fs.unlinkSync(tempFile);
 
-    // Response
     res.json({
       success: true,
-      storagePath: storagePath,
-      publicUrl: urlData.publicUrl,
+      audioUrl: urlData.publicUrl,
       dbRecord: dbData[0]
     });
 
   } catch (err) {
-    console.error(err);
+    console.error('Processing error:', err);
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
     res.status(500).json({ 
       error: 'Processing failed',
