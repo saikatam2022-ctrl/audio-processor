@@ -34,11 +34,12 @@ app.post('/process', async (req, res) => {
   const storagePath = `audios/${fileName}`;
 
   try {
-    // Step 1: Download audio using yt-dlp
+    // Step 1: Download audio using yt-dlp with local ffmpeg path
     await ytdl.exec([
       url,
       '-x',
       '--audio-format', 'mp3',
+      '--ffmpeg-location', path.join(__dirname, 'bin', 'ffmpeg'),
       '-o', tempFile
     ]);
 
