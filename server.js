@@ -3,6 +3,7 @@ const express = require('express');
 const { YTDlpWrap } = require('yt-dlp-wrap');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
+const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -14,20 +15,22 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-// Initialize yt-dlp
-const ytdl = new YTDlpWrap();
+// Use local binaries
+const ytdl = new YTDlpWrap(path.join(__dirname, 'bin', 'yt-dlp'));
+ffmpeg.setFfmpegPath(path.join(__dirname, 'bin', 'ffmpeg'));
 
 app.get('/', (req, res) => res.send('Audio Processor Running'));
 
 app.post('/process', async (req, res) => {
   const { url } = req.body;
-  
-  if (!url.includes('youtube.com/watch')) {
-    return res.status(400).json({ error: 'Invalid YouTube URL' });
+
+  if (!url || !url.includes('youtube.com/watch')) {
+    return res.status(400).json({ error: 'Invalid or missing YouTube URL' });
   }
 
-  const tempFile = `/tmp/audio-${Date.now()}.mp3`;
-  const fileName = `audio-${Date.now()}.mp3`;
+  const timestamp = Date.now();
+  const tempFile = `/tmp/audio-${timestamp}.mp3`;
+  const fileName = `audio-${timestamp}.mp3`;
   const storagePath = `audios/${fileName}`;
 
   try {
@@ -55,7 +58,7 @@ app.post('/process', async (req, res) => {
       .from('audios')
       .getPublicUrl(storagePath);
 
-    // Step 4: Insert record
+    // Step 4: Insert record in Supabase DB
     const { data: dbData, error: dbError } = await supabase
       .from('audio_files')
       .insert([{
@@ -70,7 +73,7 @@ app.post('/process', async (req, res) => {
 
     if (dbError) throw dbError;
 
-    // Cleanup
+    // Step 5: Cleanup
     fs.unlinkSync(tempFile);
 
     res.json({
