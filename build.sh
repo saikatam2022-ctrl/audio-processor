@@ -1,4 +1,4 @@
 #!/bin/bash
-# build.sh
-
+chmod +x ./bin/yt-dlp
+chmod +x ./bin/ffmpeg
 npm install
