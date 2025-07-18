@@ -1,9 +1,8 @@
 require('dotenv').config();
 const express = require('express');
-const YTDlpWrap = require('yt-dlp-wrap').default;
-const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -14,9 +13,6 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
-
-// Use local binaries
-const { exec } = require('child_process');
 
 app.post('/process', async (req, res) => {
   const { url } = req.body;
@@ -31,12 +27,16 @@ app.post('/process', async (req, res) => {
   const storagePath = `audios/${fileName}`;
 
   try {
-    // Step 1: Build yt-dlp command manually
+    // Ensure yt-dlp and ffmpeg are executable
+    fs.chmodSync(path.join(__dirname, 'bin', 'yt-dlp'), 0o755);
+    fs.chmodSync(path.join(__dirname, 'bin', 'ffmpeg'), 0o755);
+
+    // Build yt-dlp command
     const command = `${path.join(__dirname, 'bin', 'yt-dlp')} -x --audio-format mp3 --ffmpeg-location "${path.join(__dirname, 'bin', 'ffmpeg')}" -o "${tempFile}" "${url}"`;
 
     console.log(`Running command: ${command}`);
 
-    // Step 2: Run yt-dlp with promise wrapper
+    // Run yt-dlp
     await new Promise((resolve, reject) => {
       exec(command, (error, stdout, stderr) => {
         console.log('yt-dlp stdout:', stdout);
@@ -49,12 +49,12 @@ app.post('/process', async (req, res) => {
       });
     });
 
-    // Step 3: Check if file exists
+    // Check if file exists
     if (!fs.existsSync(tempFile)) {
       throw new Error('yt-dlp did not produce expected audio file');
     }
 
-    // Step 4: Upload to Supabase
+    // Upload to Supabase Storage
     const fileContent = fs.readFileSync(tempFile);
     const { error: uploadError } = await supabase.storage
       .from('audios')
@@ -65,12 +65,12 @@ app.post('/process', async (req, res) => {
 
     if (uploadError) throw uploadError;
 
-    // Step 5: Get public URL
+    // Get public URL
     const { data: urlData } = supabase.storage
       .from('audios')
       .getPublicUrl(storagePath);
 
-    // Step 6: Insert metadata
+    // Insert record in Supabase DB
     const { data: dbData, error: dbError } = await supabase
       .from('audio_files')
       .insert([{
@@ -100,56 +100,6 @@ app.post('/process', async (req, res) => {
     res.status(500).json({
       error: 'Processing failed',
       details: err.message
-    });
-  }
-});
-
-    // Step 2: Upload to Supabase Storage
-    const fileContent = fs.readFileSync(tempFile);
-    const { error: uploadError } = await supabase.storage
-      .from('audios')
-      .upload(storagePath, fileContent, {
-        contentType: 'audio/mpeg',
-        upsert: false
-      });
-
-    if (uploadError) throw uploadError;
-
-    // Step 3: Get public URL
-    const { data: urlData } = supabase.storage
-      .from('audios')
-      .getPublicUrl(storagePath);
-
-    // Step 4: Insert record in Supabase DB
-    const { data: dbData, error: dbError } = await supabase
-      .from('audio_files')
-      .insert([{
-        audio_url: urlData.publicUrl,
-        source_url: url,
-        file_name: fileName,
-        file_path: storagePath,
-        created_at: new Date().toISOString(),
-        status: 'processed'
-      }])
-      .select();
-
-    if (dbError) throw dbError;
-
-    // Step 5: Cleanup
-    fs.unlinkSync(tempFile);
-
-    res.json({
-      success: true,
-      audioUrl: urlData.publicUrl,
-      dbRecord: dbData[0]
-    });
-
-  } catch (err) {
-    console.error('Processing error:', err);
-    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-    res.status(500).json({ 
-      error: 'Processing failed',
-      details: err.message 
     });
   }
 });
