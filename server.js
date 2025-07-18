@@ -28,7 +28,7 @@ app.post('/process', async (req, res) => {
 
   try {
     // Build yt-dlp command using npx
-    const command = `npx yt-dlp -x --audio-format mp3 -o "${tempFile}" "${url}"`;
+    const command = `yt-dlp -x --audio-format mp3 -o "${tempFile}" "${url}"`;
     console.log(`Running command: ${command}`);
 
     // Run yt-dlp
