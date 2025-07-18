@@ -38,14 +38,24 @@ app.post('/process', async (req, res) => {
 
     // Run yt-dlp
     await new Promise((resolve, reject) => {
-      exec(command, (error, stdout, stderr) => {
-        console.log('yt-dlp stdout:', stdout);
-        console.log('yt-dlp stderr:', stderr);
-        if (error) {
-          console.error('yt-dlp error:', error);
-          return reject(new Error(`yt-dlp failed: ${stderr}`));
-        }
-        resolve();
+     exec(command, (error, stdout, stderr) => {
+  console.log('===== yt-dlp stdout =====');
+  console.log(stdout);
+  console.log('===== yt-dlp stderr =====');
+  console.log(stderr);
+  if (error) {
+    console.error('===== yt-dlp error =====');
+    console.error(error);
+    return reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
+  }
+
+  // Confirm if file was created
+  if (!fs.existsSync(tempFile)) {
+    console.error('yt-dlp did not create expected output file at:', tempFile);
+    return reject(new Error('yt-dlp did not produce expected audio file'));
+  }
+
+  resolve();
       });
     });
 
