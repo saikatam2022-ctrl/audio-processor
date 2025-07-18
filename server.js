@@ -27,42 +27,32 @@ app.post('/process', async (req, res) => {
   const storagePath = `audios/${fileName}`;
 
   try {
-    // Ensure yt-dlp and ffmpeg are executable
-    fs.chmodSync(path.join(__dirname, 'bin', 'yt-dlp'), 0o755);
-    fs.chmodSync(path.join(__dirname, 'bin', 'ffmpeg'), 0o755);
-
-    // Build yt-dlp command
-    const command = `${path.join(__dirname, 'bin', 'yt-dlp')} -x --audio-format mp3 --ffmpeg-location "${path.join(__dirname, 'bin', 'ffmpeg')}" -o "${tempFile}" "${url}"`;
-
+    // Build yt-dlp command using npx
+    const command = `npx yt-dlp -x --audio-format mp3 -o "${tempFile}" "${url}"`;
     console.log(`Running command: ${command}`);
 
     // Run yt-dlp
     await new Promise((resolve, reject) => {
-     exec(command, (error, stdout, stderr) => {
-  console.log('===== yt-dlp stdout =====');
-  console.log(stdout);
-  console.log('===== yt-dlp stderr =====');
-  console.log(stderr);
-  if (error) {
-    console.error('===== yt-dlp error =====');
-    console.error(error);
-    return reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
-  }
+      exec(command, (error, stdout, stderr) => {
+        console.log('===== yt-dlp stdout =====');
+        console.log(stdout);
+        console.log('===== yt-dlp stderr =====');
+        console.log(stderr);
+        if (error) {
+          console.error('===== yt-dlp error =====');
+          console.error(error);
+          return reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
+        }
 
-  // Confirm if file was created
-  if (!fs.existsSync(tempFile)) {
-    console.error('yt-dlp did not create expected output file at:', tempFile);
-    return reject(new Error('yt-dlp did not produce expected audio file'));
-  }
+        // Confirm if file was created
+        if (!fs.existsSync(tempFile)) {
+          console.error('yt-dlp did not create expected output file at:', tempFile);
+          return reject(new Error('yt-dlp did not produce expected audio file'));
+        }
 
-  resolve();
+        resolve();
       });
     });
-
-    // Check if file exists
-    if (!fs.existsSync(tempFile)) {
-      throw new Error('yt-dlp did not produce expected audio file');
-    }
 
     // Upload to Supabase Storage
     const fileContent = fs.readFileSync(tempFile);
