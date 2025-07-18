@@ -1,4 +1,9 @@
 #!/bin/bash
 # build.sh
-sudo apt-get update && sudo apt-get install -y ffmpeg
+
+# Give execute permission to yt-dlp and ffmpeg binaries
+chmod +x ./bin/yt-dlp
+chmod +x ./bin/ffmpeg
+
+# Install node dependencies
 npm install
