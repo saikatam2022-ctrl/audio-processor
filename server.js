@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { YTDlpWrap } = require('yt-dlp-wrap');
+const YTDlpWrap = require('yt-dlp-wrap');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
