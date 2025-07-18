@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { exec } = require('yt-dlp-exec'); // Replaces ytdl-core
+const { YTDlpWrap } = require('yt-dlp-wrap');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const { createClient } = require('@supabase/supabase-js');
@@ -14,12 +14,14 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+// Initialize yt-dlp
+const ytdl = new YTDlpWrap();
+
 app.get('/', (req, res) => res.send('Audio Processor Running'));
 
 app.post('/process', async (req, res) => {
   const { url } = req.body;
   
-  // Basic URL validation
   if (!url.includes('youtube.com/watch')) {
     return res.status(400).json({ error: 'Invalid YouTube URL' });
   }
@@ -29,8 +31,13 @@ app.post('/process', async (req, res) => {
   const storagePath = `audios/${fileName}`;
 
   try {
-    // Step 1: Download audio using yt-dlp (more reliable)
-    await exec(`yt-dlp -x -f bestaudio --audio-format mp3 -o ${tempFile} ${url}`);
+    // Step 1: Download audio using yt-dlp
+    await ytdl.exec([
+      url,
+      '-x',
+      '--audio-format', 'mp3',
+      '-o', tempFile
+    ]);
 
     // Step 2: Upload to Supabase Storage
     const fileContent = fs.readFileSync(tempFile);
