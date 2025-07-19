@@ -17,8 +17,11 @@ const supabase = createClient(
 app.post('/process', async (req, res) => {
   const { url } = req.body;
 
-  if (!url || !url.includes('youtube.com/watch')) {
-    return res.status(400).json({ error: 'Invalid or missing YouTube URL' });
+  const isYouTube = url?.includes('youtube.com') || url?.includes('youtu.be');
+  const isAudioFile = url?.match(/\.(mp3|wav|m4a|aac|ogg)$/i);
+
+  if (!url || (!isYouTube && !isAudioFile)) {
+    return res.status(400).json({ error: 'Invalid or unsupported URL' });
   }
 
   const timestamp = Date.now();
@@ -27,32 +30,33 @@ app.post('/process', async (req, res) => {
   const storagePath = `audios/${fileName}`;
 
   try {
-    // Build yt-dlp command using npx
-    const command = `yt-dlp -x --audio-format mp3 -o "${tempFile}" "${url}"`;
-    console.log(`Running command: ${command}`);
+    if (isYouTube) {
+      const command = `yt-dlp -x --audio-format mp3 -o "${tempFile}" "${url}"`;
+      console.log(`Running yt-dlp: ${command}`);
 
-    // Run yt-dlp
-    await new Promise((resolve, reject) => {
-      exec(command, (error, stdout, stderr) => {
-        console.log('===== yt-dlp stdout =====');
-        console.log(stdout);
-        console.log('===== yt-dlp stderr =====');
-        console.log(stderr);
-        if (error) {
-          console.error('===== yt-dlp error =====');
-          console.error(error);
-          return reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
-        }
-
-        // Confirm if file was created
-        if (!fs.existsSync(tempFile)) {
-          console.error('yt-dlp did not create expected output file at:', tempFile);
-          return reject(new Error('yt-dlp did not produce expected audio file'));
-        }
-
-        resolve();
+      await new Promise((resolve, reject) => {
+        exec(command, (error, stdout, stderr) => {
+          console.log('yt-dlp stdout:', stdout);
+          console.log('yt-dlp stderr:', stderr);
+          if (error) return reject(new Error(stderr || error.message));
+          if (!fs.existsSync(tempFile)) return reject(new Error('yt-dlp did not produce expected audio file'));
+          resolve();
+        });
       });
-    });
+    } else if (isAudioFile) {
+      const command = `curl -L --output "${tempFile}" "${url}"`;
+      console.log(`Downloading audio file: ${command}`);
+
+      await new Promise((resolve, reject) => {
+        exec(command, (error, stdout, stderr) => {
+          console.log('curl stdout:', stdout);
+          console.log('curl stderr:', stderr);
+          if (error) return reject(new Error(`Failed to download file: ${stderr || error.message}`));
+          if (!fs.existsSync(tempFile)) return reject(new Error('Audio file not downloaded'));
+          resolve();
+        });
+      });
+    }
 
     // Upload to Supabase Storage
     const fileContent = fs.readFileSync(tempFile);
@@ -65,12 +69,9 @@ app.post('/process', async (req, res) => {
 
     if (uploadError) throw uploadError;
 
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('audios')
-      .getPublicUrl(storagePath);
+    const { data: urlData } = supabase.storage.from('audios').getPublicUrl(storagePath);
 
-    // Insert record in Supabase DB
+    // Insert record in Supabase Database
     const { data: dbData, error: dbError } = await supabase
       .from('audio_files')
       .insert([{
@@ -85,7 +86,7 @@ app.post('/process', async (req, res) => {
 
     if (dbError) throw dbError;
 
-    // Cleanup
+    // Delete temp file
     fs.unlinkSync(tempFile);
 
     res.json({
@@ -95,14 +96,11 @@ app.post('/process', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Processing error:', err);
+    console.error('Processing error:', err.message);
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-    res.status(500).json({
-      error: 'Processing failed',
-      details: err.message
-    });
+    res.status(500).json({ error: 'Processing failed', details: err.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Running on ${PORT}`));
+app.listen(PORT, () => console.log(`Running on port ${PORT}`));
