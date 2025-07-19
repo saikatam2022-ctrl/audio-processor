@@ -17,11 +17,8 @@ const supabase = createClient(
 app.post('/process', async (req, res) => {
   const { url } = req.body;
 
-  const isYouTube = url?.includes('youtube.com') || url?.includes('youtu.be');
-  const isAudioFile = url?.match(/\.(mp3|wav|m4a|aac|ogg)$/i);
-
-  if (!url || (!isYouTube && !isAudioFile)) {
-    return res.status(400).json({ error: 'Invalid or unsupported URL' });
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({ error: 'Missing or invalid URL' });
   }
 
   const timestamp = Date.now();
@@ -30,35 +27,39 @@ app.post('/process', async (req, res) => {
   const storagePath = `audios/${fileName}`;
 
   try {
-    if (isYouTube) {
+    if (url.includes('youtube.com/watch') || url.includes('youtu.be')) {
+      // 📹 Handle YouTube URL using yt-dlp
       const command = `yt-dlp -x --audio-format mp3 -o "${tempFile}" "${url}"`;
-      console.log(`Running yt-dlp: ${command}`);
+      console.log(`Running command: ${command}`);
 
       await new Promise((resolve, reject) => {
         exec(command, (error, stdout, stderr) => {
-          console.log('yt-dlp stdout:', stdout);
-          console.log('yt-dlp stderr:', stderr);
-          if (error) return reject(new Error(stderr || error.message));
+          console.log('===== yt-dlp stdout =====\n' + stdout);
+          console.log('===== yt-dlp stderr =====\n' + stderr);
+          if (error) return reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
           if (!fs.existsSync(tempFile)) return reject(new Error('yt-dlp did not produce expected audio file'));
           resolve();
         });
       });
-    } else if (isAudioFile) {
+    } else if (url.endsWith('.mp3') || url.includes('.mp3')) {
+      // 🎧 Handle direct audio link using curl
       const command = `curl -L --output "${tempFile}" "${url}"`;
       console.log(`Downloading audio file: ${command}`);
 
       await new Promise((resolve, reject) => {
         exec(command, (error, stdout, stderr) => {
-          console.log('curl stdout:', stdout);
-          console.log('curl stderr:', stderr);
+          console.log('curl stdout:\n', stdout);
+          console.log('curl stderr:\n', stderr);
           if (error) return reject(new Error(`Failed to download file: ${stderr || error.message}`));
-          if (!fs.existsSync(tempFile)) return reject(new Error('Audio file not downloaded'));
+          if (!fs.existsSync(tempFile)) return reject(new Error('Download failed: File not found'));
           resolve();
         });
       });
+    } else {
+      return res.status(400).json({ error: 'Unsupported URL format' });
     }
 
-    // Upload to Supabase Storage
+    // ☁️ Upload to Supabase
     const fileContent = fs.readFileSync(tempFile);
     const { error: uploadError } = await supabase.storage
       .from('audios')
@@ -69,9 +70,12 @@ app.post('/process', async (req, res) => {
 
     if (uploadError) throw uploadError;
 
-    const { data: urlData } = supabase.storage.from('audios').getPublicUrl(storagePath);
+    // 🔗 Get public URL
+    const { data: urlData } = supabase.storage
+      .from('audios')
+      .getPublicUrl(storagePath);
 
-    // Insert record in Supabase Database
+    // 🗃️ Insert metadata in Supabase DB
     const { data: dbData, error: dbError } = await supabase
       .from('audio_files')
       .insert([{
@@ -86,7 +90,7 @@ app.post('/process', async (req, res) => {
 
     if (dbError) throw dbError;
 
-    // Delete temp file
+    // 🧹 Clean up
     fs.unlinkSync(tempFile);
 
     res.json({
@@ -96,9 +100,12 @@ app.post('/process', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Processing error:', err.message);
+    console.error('Processing error:', err);
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-    res.status(500).json({ error: 'Processing failed', details: err.message });
+    res.status(500).json({
+      error: 'Processing failed',
+      details: err.message
+    });
   }
 });
 
