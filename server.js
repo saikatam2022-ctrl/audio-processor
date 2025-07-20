@@ -27,22 +27,22 @@ app.post('/process', async (req, res) => {
   const storagePath = `audios/${fileName}`;
 
   try {
+    // 🔽 Download audio (YouTube or direct MP3)
     if (url.includes('youtube.com/watch') || url.includes('youtu.be')) {
-      // 📹 Handle YouTube URL using yt-dlp
       const command = `yt-dlp -x --audio-format mp3 -o "${tempFile}" "${url}"`;
       console.log(`Running command: ${command}`);
 
       await new Promise((resolve, reject) => {
         exec(command, (error, stdout, stderr) => {
-          console.log('===== yt-dlp stdout =====\n' + stdout);
-          console.log('===== yt-dlp stderr =====\n' + stderr);
+          console.log('yt-dlp stdout:\n', stdout);
+          console.log('yt-dlp stderr:\n', stderr);
           if (error) return reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
           if (!fs.existsSync(tempFile)) return reject(new Error('yt-dlp did not produce expected audio file'));
           resolve();
         });
       });
+
     } else if (url.endsWith('.mp3') || url.includes('.mp3')) {
-      // 🎧 Handle direct audio link using curl
       const command = `curl -L --output "${tempFile}" "${url}"`;
       console.log(`Downloading audio file: ${command}`);
 
@@ -50,16 +50,22 @@ app.post('/process', async (req, res) => {
         exec(command, (error, stdout, stderr) => {
           console.log('curl stdout:\n', stdout);
           console.log('curl stderr:\n', stderr);
-          if (error) return reject(new Error(`Failed to download file: ${stderr || error.message}`));
+          if (error) return reject(new Error(`Download failed: ${stderr || error.message}`));
           if (!fs.existsSync(tempFile)) return reject(new Error('Download failed: File not found'));
           resolve();
         });
       });
+
     } else {
       return res.status(400).json({ error: 'Unsupported URL format' });
     }
 
-    // ☁️ Upload to Supabase
+    // 🧾 Get file info
+    const fileStats = fs.statSync(tempFile);
+    const fileSize = fileStats.size;
+    const originalName = path.basename(url.split('?')[0]);
+
+    // ☁️ Upload to Supabase Storage
     const fileContent = fs.readFileSync(tempFile);
     const { error: uploadError } = await supabase.storage
       .from('audios')
@@ -75,9 +81,7 @@ app.post('/process', async (req, res) => {
       .from('audios')
       .getPublicUrl(storagePath);
 
-    // 🗃️ Insert metadata in Supabase DB
-        const originalName = path.basename(url.split('?')[0]); // clean URL filename if possible
-
+    // 🗃️ Insert metadata into DB
     const { data: dbData, error: dbError } = await supabase
       .from('audio_files')
       .insert([{
@@ -86,15 +90,16 @@ app.post('/process', async (req, res) => {
         source_url: url,
         file_name: fileName,
         file_path: storagePath,
+        file_size: fileSize,
+        mime_type: 'audio/mpeg',
         created_at: new Date().toISOString(),
         status: 'processed'
       }])
-
       .select();
 
     if (dbError) throw dbError;
 
-    // 🧹 Clean up
+    // 🧹 Cleanup
     fs.unlinkSync(tempFile);
 
     res.json({
