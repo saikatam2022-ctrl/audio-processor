@@ -76,9 +76,12 @@ app.post('/process', async (req, res) => {
       .getPublicUrl(storagePath);
 
     // 🗃️ Insert metadata in Supabase DB
+        const originalName = path.basename(url.split('?')[0]); // clean URL filename if possible
+
     const { data: dbData, error: dbError } = await supabase
       .from('audio_files')
       .insert([{
+        original_name: originalName || fileName,
         audio_url: urlData.publicUrl,
         source_url: url,
         file_name: fileName,
@@ -86,6 +89,7 @@ app.post('/process', async (req, res) => {
         created_at: new Date().toISOString(),
         status: 'processed'
       }])
+
       .select();
 
     if (dbError) throw dbError;
