@@ -28,19 +28,21 @@ app.post('/process', async (req, res) => {
 
   try {
     if (url.includes('youtube.com/watch') || url.includes('youtu.be')) {
+      // 📹 Handle YouTube URL using yt-dlp
       const command = `yt-dlp -x --audio-format mp3 -o "${tempFile}" "${url}"`;
       console.log(`Running command: ${command}`);
 
       await new Promise((resolve, reject) => {
         exec(command, (error, stdout, stderr) => {
-          console.log('yt-dlp stdout:\n', stdout);
-          console.log('yt-dlp stderr:\n', stderr);
+          console.log('===== yt-dlp stdout =====\n' + stdout);
+          console.log('===== yt-dlp stderr =====\n' + stderr);
           if (error) return reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
           if (!fs.existsSync(tempFile)) return reject(new Error('yt-dlp did not produce expected audio file'));
           resolve();
         });
       });
     } else if (url.endsWith('.mp3') || url.includes('.mp3')) {
+      // 🎧 Handle direct audio link using curl
       const command = `curl -L --output "${tempFile}" "${url}"`;
       console.log(`Downloading audio file: ${command}`);
 
@@ -57,43 +59,38 @@ app.post('/process', async (req, res) => {
       return res.status(400).json({ error: 'Unsupported URL format' });
     }
 
-    // Upload to Supabase Storage
-    const fileBuffer = fs.readFileSync(tempFile);
-    const fileStats = fs.statSync(tempFile);
-
+    // ☁️ Upload to Supabase
+    const fileContent = fs.readFileSync(tempFile);
     const { error: uploadError } = await supabase.storage
       .from('audios')
-      .upload(storagePath, fileBuffer, {
+      .upload(storagePath, fileContent, {
         contentType: 'audio/mpeg',
         upsert: false
       });
 
     if (uploadError) throw uploadError;
 
+    // 🔗 Get public URL
     const { data: urlData } = supabase.storage
       .from('audios')
       .getPublicUrl(storagePath);
 
-    // Insert metadata into DB
+    // 🗃️ Insert metadata in Supabase DB
     const { data: dbData, error: dbError } = await supabase
       .from('audio_files')
       .insert([{
-        user_id: 'anonymous', // Replace with actual user ID if needed
-        original_name: fileName,
-        file_path: storagePath,
-        file_size: fileStats.size,
-        mime_type: 'audio/mpeg',
-        duration: null, // Optional: populate with ffprobe if needed
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
         audio_url: urlData.publicUrl,
         source_url: url,
+        file_name: fileName,
+        file_path: storagePath,
+        created_at: new Date().toISOString(),
         status: 'processed'
       }])
       .select();
 
     if (dbError) throw dbError;
 
+    // 🧹 Clean up
     fs.unlinkSync(tempFile);
 
     res.json({
@@ -113,4 +110,4 @@ app.post('/process', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Running on port ${PORT}`));
